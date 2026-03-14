@@ -390,8 +390,14 @@ icm20948_status_e icm20948_get_who_am_i(icm20948_device_t *pdev, uint8_t *whoami
   {
     return ICM_20948_STAT_PARAM_ERR;
   }
-  icm20948_set_bank(pdev, 0); // Must be in the right bank
-  return icm20948_execute_r(pdev, AGB0_REG_WHO_AM_I, whoami, 1);
+  icm20948_status_e retval;
+  retval = icm20948_set_bank(pdev, 0); // Must be in the right bank
+  if (retval != ICM_20948_STAT_OK)
+  {
+    return retval;
+  }
+  retval = icm20948_execute_r(pdev, AGB0_REG_WHO_AM_I, whoami, 1);
+  return retval;
 }
 
 icm20948_status_e icm20948_check_id(icm20948_device_t *pdev)

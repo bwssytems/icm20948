@@ -9,27 +9,18 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
+#include "driver/i2c_master.h"
 
 #include "icm20948.h"
 #include "icm20948_i2c.h"
 
 #define TAG "i2c_dmp_quat9_orientation"
 
-/* i2c bus configuration */
-i2c_config_t conf = {
-	.mode = I2C_MODE_MASTER,
-	.sda_io_num = (gpio_num_t) CONFIG_I2C_MASTER_SDA,
-	.sda_pullup_en = GPIO_PULLUP_ENABLE,
-	.scl_io_num = (gpio_num_t) CONFIG_I2C_MASTER_SCL,
-	.scl_pullup_en = GPIO_PULLUP_ENABLE,
-	.master.clk_speed = 400000,
-	.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL
-};
-
 /* ICM 20948 configuration */
 icm0948_config_i2c_t icm_config = {
-	.i2c_port = I2C_NUM_0,
-	.i2c_addr = ICM_20948_I2C_ADDR_AD1
+	.bus_handle = NULL,
+	.dev_handle = NULL,
+	.i2c_addr = ICM_20948_I2C_ADDR_AD0
 };
 
 
@@ -37,44 +28,19 @@ void init_dmp(icm20948_device_t *icm)
 {
   	bool success = true; // Use success to show if the DMP configuration was successful
 
-  	// Initialize the DMP with defaults.
+  	// Initialize the DMP with defaults (includes magnetometer setup)
   	success &= (icm20948_init_dmp_sensor_with_defaults(icm) == ICM_20948_STAT_OK);
-	// DMP sensor options are defined in ICM_20948_DMP.h
-	//    INV_ICM20948_SENSOR_ACCELEROMETER               (16-bit accel)
-	//    INV_ICM20948_SENSOR_GYROSCOPE                   (16-bit gyro + 32-bit calibrated gyro)
-	//    INV_ICM20948_SENSOR_RAW_ACCELEROMETER           (16-bit accel)
-	//    INV_ICM20948_SENSOR_RAW_GYROSCOPE               (16-bit gyro + 32-bit calibrated gyro)
-	//    INV_ICM20948_SENSOR_MAGNETIC_FIELD_UNCALIBRATED (16-bit compass)
-	//    INV_ICM20948_SENSOR_GYROSCOPE_UNCALIBRATED      (16-bit gyro)
-	//    INV_ICM20948_SENSOR_STEP_DETECTOR               (Pedometer Step Detector)
-	//    INV_ICM20948_SENSOR_STEP_COUNTER                (Pedometer Step Detector)
-	//    INV_ICM20948_SENSOR_GAME_ROTATION_VECTOR        (32-bit 6-axis quaternion)
-	//    INV_ICM20948_SENSOR_ROTATION_VECTOR             (32-bit 9-axis quaternion + heading accuracy)
-	//    INV_ICM20948_SENSOR_GEOMAGNETIC_ROTATION_VECTOR (32-bit Geomag RV + heading accuracy)
-	//    INV_ICM20948_SENSOR_GEOMAGNETIC_FIELD           (32-bit calibrated compass)
-	//    INV_ICM20948_SENSOR_GRAVITY                     (32-bit 6-axis quaternion)
-	//    INV_ICM20948_SENSOR_LINEAR_ACCELERATION         (16-bit accel + 32-bit 6-axis quaternion)
-	//    INV_ICM20948_SENSOR_ORIENTATION                 (32-bit 9-axis quaternion + heading accuracy)
-
-	// Enable the DMP orientation sensor
+	
+	// Enable the DMP orientation sensor (9-axis with magnetometer)
 	success &= (inv_icm20948_enable_dmp_sensor(icm, INV_ICM20948_SENSOR_ORIENTATION, 1) == ICM_20948_STAT_OK);
+	
+	// Enable magnetometer for 9-axis fusion
+	success &= (inv_icm20948_enable_dmp_sensor(icm, INV_ICM20948_SENSOR_MAGNETIC_FIELD_UNCALIBRATED, 1) == ICM_20948_STAT_OK);
 
-	// Enable any additional sensors / features
-	//success &= (myICM.enableDMPSensor(INV_ICM20948_SENSOR_RAW_GYROSCOPE) == ICM_20948_STAT_OK);
-	//success &= (myICM.enableDMPSensor(INV_ICM20948_SENSOR_RAW_ACCELEROMETER) == ICM_20948_STAT_OK);
-	//success &= (myICM.enableDMPSensor(INV_ICM20948_SENSOR_MAGNETIC_FIELD_UNCALIBRATED) == ICM_20948_STAT_OK);
-
-	// Configuring DMP to output data at multiple ODRs:
-	// DMP is capable of outputting multiple sensor data at different rates to FIFO.
-	// Setting value can be calculated as follows:
-	// Value = (DMP running rate / ODR ) - 1
-	// E.g. For a 5Hz ODR rate when DMP is running at 55Hz, value = (55/5) - 1 = 10.
-	success &= (inv_icm20948_set_dmp_sensor_period(icm, DMP_ODR_Reg_Quat9, 0) == ICM_20948_STAT_OK); // Set to the maximum
-	//success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Accel, 0) == ICM_20948_STAT_OK); // Set to the maximum
-	//success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Gyro, 0) == ICM_20948_STAT_OK); // Set to the maximum
-	//success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Gyro_Calibr, 0) == ICM_20948_STAT_OK); // Set to the maximum
-	//success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Cpass, 0) == ICM_20948_STAT_OK); // Set to the maximum
-	//success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Cpass_Calibr, 0) == ICM_20948_STAT_OK); // Set to the maximum
+	// Set ODR for Quat9 and magnetometer
+	success &= (inv_icm20948_set_dmp_sensor_period(icm, DMP_ODR_Reg_Quat9, 0) == ICM_20948_STAT_OK);
+	success &= (inv_icm20948_set_dmp_sensor_period(icm, DMP_ODR_Reg_Cpass, 0) == ICM_20948_STAT_OK);
+	
 	// Enable the FIFO
 	success &= (icm20948_enable_fifo(icm, true) == ICM_20948_STAT_OK);
 	// Enable the DMP
@@ -100,31 +66,45 @@ void app_main(void)
 {
 	icm20948_device_t icm;
 
-	/* setup i2c */
-	ESP_ERROR_CHECK(i2c_param_config(icm_config.i2c_port, &conf));
-	ESP_ERROR_CHECK(i2c_driver_install(icm_config.i2c_port, conf.mode, 0, 0, 0));
+	/* setup i2c bus */
+	i2c_master_bus_config_t bus_config = {
+		.i2c_port = I2C_NUM_0,
+		.sda_io_num = CONFIG_I2C_MASTER_SDA,
+		.scl_io_num = CONFIG_I2C_MASTER_SCL,
+		.clk_source = I2C_CLK_SRC_DEFAULT,
+		.glitch_ignore_cnt = 7,
+		.flags.enable_internal_pullup = true,
+	};
+	ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &icm_config.bus_handle));
+
+	/* setup i2c device */
+	i2c_device_config_t dev_config = {
+		.dev_addr_length = I2C_ADDR_BIT_LEN_7,
+		.device_address = icm_config.i2c_addr,
+		.scl_speed_hz = 100000,
+	};
+	ESP_ERROR_CHECK(i2c_master_bus_add_device(icm_config.bus_handle, &dev_config, &icm_config.dev_handle));
+	vTaskDelay(100 / portTICK_PERIOD_MS);
 	
 	/* setup ICM20948 device */
 	icm20948_init_i2c(&icm, &icm_config);
+	
+	/* wake up device first */
+	icm20948_sleep(&icm, false);
+	vTaskDelay(50 / portTICK_PERIOD_MS);
 		
 	/* check ID */
+	uint8_t whoami = 0x00;
+	icm20948_status_e stat = icm20948_get_who_am_i(&icm, &whoami);
+	ESP_LOGI(TAG, "WHO_AM_I read status: %d, value: 0x%02X (expected: 0xEA)", stat, whoami);
+	
     while (icm20948_check_id(&icm) != ICM_20948_STAT_OK)
 	{
-		ESP_LOGE(TAG, "check id failed");
+		stat = icm20948_get_who_am_i(&icm, &whoami);
+		ESP_LOGE(TAG, "check id failed - status: %d, WHO_AM_I: 0x%02X", stat, whoami);
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 	ESP_LOGI(TAG, "check id passed");
-
-	/* check whoami */
-	icm20948_status_e stat = ICM_20948_STAT_ERR;
-	uint8_t whoami = 0x00;
-	while ((stat != ICM_20948_STAT_OK) || (whoami != ICM_20948_WHOAMI))
-	{
-		whoami = 0x00;
-		stat = icm20948_get_who_am_i(&icm, &whoami);
-		ESP_LOGE(TAG, "whoami does not match (0x %d). Halting...", whoami);
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
-	}
 
 	/* Here we are doing a SW reset to make sure the device starts in a known state */
 	icm20948_sw_reset(&icm);
@@ -184,7 +164,14 @@ void app_main(void)
 				double q2 = ((double)data.Quat9.Data.Q2) / 1073741824.0; // Convert to double. Divide by 2^30
 				double q3 = ((double)data.Quat9.Data.Q3) / 1073741824.0; // Convert to double. Divide by 2^30
 				double q0 = sqrt(1.0 - ((q1 * q1) + (q2 * q2) + (q3 * q3)));
-				ESP_LOGI(TAG, "Q1: %f Q2: %f Q3: %f Accuracy: %d", q1, q2, q3, data.Quat9.Data.Accuracy);
+				
+				// Convert quaternion to Euler angles (roll, pitch, yaw)
+				double roll = atan2(2.0 * (q0 * q1 + q2 * q3), 1.0 - 2.0 * (q1 * q1 + q2 * q2)) * 180.0 / M_PI;
+				double sinp = 2.0 * (q0 * q2 - q3 * q1);
+				double pitch = (fabs(sinp) >= 1) ? copysign(90.0, sinp) : asin(sinp) * 180.0 / M_PI;
+				double yaw = atan2(2.0 * (q0 * q3 + q1 * q2), 1.0 - 2.0 * (q2 * q2 + q3 * q3)) * 180.0 / M_PI;
+				
+				ESP_LOGI(TAG, "Roll: %.2f° Pitch: %.2f° Yaw: %.2f° (Accuracy: %d)", roll, pitch, yaw, data.Quat9.Data.Accuracy);
 			}
 		}
 		if(status != ICM_20948_STAT_FIFO_MORE_DATA_AVAIL) {

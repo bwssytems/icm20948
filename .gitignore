@@ -1,0 +1,31 @@
+# Build directory
+build/
+
+# Dependency directories
+managed_components/
+
+# Cache directory
+.cache/
+
+# ESP-IDF specific
+sdkconfig.old
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

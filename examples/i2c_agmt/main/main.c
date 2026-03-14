@@ -8,27 +8,18 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
+#include "driver/i2c_master.h"
 
 #include "icm20948.h"
 #include "icm20948_i2c.h"
 
 #define TAG "i2c_agmt"
 
-/* i2c bus configuration */
-i2c_config_t conf = {
-	.mode = I2C_MODE_MASTER,
-	.sda_io_num = (gpio_num_t) CONFIG_I2C_MASTER_SDA,
-	.sda_pullup_en = GPIO_PULLUP_ENABLE,
-	.scl_io_num = (gpio_num_t) CONFIG_I2C_MASTER_SCL,
-	.scl_pullup_en = GPIO_PULLUP_ENABLE,
-	.master.clk_speed = 400000,
-	.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL
-};
-
 /* ICM 20948 configuration */
 icm0948_config_i2c_t icm_config = {
-	.i2c_port = I2C_NUM_0,
-	.i2c_addr = ICM_20948_I2C_ADDR_AD1
+	.bus_handle = NULL,
+	.dev_handle = NULL,
+	.i2c_addr = ICM_20948_I2C_ADDR_AD0
 };
 
 
@@ -46,31 +37,45 @@ void app_main(void)
 {
 	icm20948_device_t icm;
 
-	/* setup i2c */
-	ESP_ERROR_CHECK(i2c_param_config(icm_config.i2c_port, &conf));
-	ESP_ERROR_CHECK(i2c_driver_install(icm_config.i2c_port, conf.mode, 0, 0, 0));
+	/* setup i2c bus */
+	i2c_master_bus_config_t bus_config = {
+		.i2c_port = I2C_NUM_0,
+		.sda_io_num = CONFIG_I2C_MASTER_SDA,
+		.scl_io_num = CONFIG_I2C_MASTER_SCL,
+		.clk_source = I2C_CLK_SRC_DEFAULT,
+		.glitch_ignore_cnt = 7,
+		.flags.enable_internal_pullup = true,
+	};
+	ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &icm_config.bus_handle));
+
+	/* setup i2c device */
+	i2c_device_config_t dev_config = {
+		.dev_addr_length = I2C_ADDR_BIT_LEN_7,
+		.device_address = icm_config.i2c_addr,
+		.scl_speed_hz = 400000,
+	};
+	ESP_ERROR_CHECK(i2c_master_bus_add_device(icm_config.bus_handle, &dev_config, &icm_config.dev_handle));
+	vTaskDelay(100 / portTICK_PERIOD_MS);
 	
 	/* setup ICM20948 device */
 	icm20948_init_i2c(&icm, &icm_config);
+	
+	/* wake up device first */
+	icm20948_sleep(&icm, false);
+	vTaskDelay(50 / portTICK_PERIOD_MS);
 		
 	/* check ID */
+	uint8_t whoami = 0x00;
+	icm20948_status_e stat = icm20948_get_who_am_i(&icm, &whoami);
+	ESP_LOGI(TAG, "WHO_AM_I read status: %d, value: 0x%02X (expected: 0xEA)", stat, whoami);
+	
     while (icm20948_check_id(&icm) != ICM_20948_STAT_OK)
 	{
-		ESP_LOGE(TAG, "check id failed");
+		stat = icm20948_get_who_am_i(&icm, &whoami);
+		ESP_LOGE(TAG, "check id failed - status: %d, WHO_AM_I: 0x%02X", stat, whoami);
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 	ESP_LOGI(TAG, "check id passed");
-
-	/* check whoami */
-	icm20948_status_e stat = ICM_20948_STAT_ERR;
-	uint8_t whoami = 0x00;
-	while ((stat != ICM_20948_STAT_OK) || (whoami != ICM_20948_WHOAMI))
-	{
-		whoami = 0x00;
-		stat = icm20948_get_who_am_i(&icm, &whoami);
-		ESP_LOGE(TAG, "whoami does not match (0x %d). Halting...", whoami);
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
-	}
 
 	/* Here we are doing a SW reset to make sure the device starts in a known state */
 	icm20948_sw_reset(&icm);
